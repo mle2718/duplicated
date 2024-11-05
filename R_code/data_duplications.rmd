@@ -127,6 +127,8 @@ I believe the first row here duplicates the next 4.  Summing the LNDLB and LIVLB
 
 The same is true for the next group of rows (row 6 compared to rows 7:10).
 
+
+
 ```{r CFDERS_ALL_YEARS, results=TRUE, eval=TRUE}
 DERS_AY<-DERS_ALL_YEARS %>%
   head(10) %>%
@@ -178,6 +180,14 @@ kbl(CAM_DETSAA, digits=0,booktabs=T, align=c("l",rep('r',times=12)), caption =  
 ```
 Since I can't filter using cf_license, this show some extra rows that are not necessarily a concern.
 
+
+I only printed the first couple observations.
+```{r, include=TRUE}
+CAMS_data %>%
+  dplyr::filter(STATUS=='PZERO') %>%
+summarise(mt=sum(LNDLB/2204))
+```
+But it  looks like there might be as much as 58mt from this 1 vessel in 2021.
 
 
 # R Session Information
