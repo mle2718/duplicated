@@ -37,7 +37,9 @@ options(tinytex.verbose = TRUE)
 # Set up paths.
 ```
 
-# Organization
+# Overview
+
+I think there may be some "duplicated" records in CFDBS tables.  These look like they are entered late
 
 
 
@@ -80,16 +82,16 @@ DERS_ALL_YEARS<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
    collect()
 
 DERS_ALL_YEARS<-DERS_ALL_YEARS %>%
-  relocate(any_of(c("YEAR", "MONTH", "DAY", "DEALNUM", "STATE_DNUM", "CF_LICENSE", "PERMIT", "HULLNUM", "SPPLNDLB", "SPPLIVLB", "SPPVALUE", "DERSOURCE", "LINK")))
+  relocate(any_of(c("YEAR", "MONTH", "DAY", "DEALNUM", "STATE_DNUM", "CF_LICENSE", "PERMIT", "HULLNUM", "SPPLNDLB", "SPPLIVLB", "SPPVALUE", "DERSOURCE", "LINK", "DOE","DDATE","DOC")))
 
 
 # CFDBS.CFDERS2021
-CURRENT.QUERY <- "select * from cfdbs.cfders2021 where nespp3=335 and year=2021 and month=1 and state=49 and cf_license='2147' order by day"
+CURRENT.QUERY <- "select * from cfdbs.cfders2021 where nespp3=335 and year=2021 and month=1 and state=49 order by day"
 
 DERS2021<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
    collect()
 DERS2021<-DERS2021 %>%
-  relocate(any_of(c("YEAR", "MONTH", "DAY", "DEALNUM", "STATE_DNUM", "CF_LICENSE", "PERMIT", "HULLNUM", "SPPLNDLB", "SPPLIVLB", "SPPVALUE", "DERSOURCE", "LINK")))
+  relocate(any_of(c("YEAR", "MONTH", "DAY", "DEALNUM", "STATE_DNUM", "CF_LICENSE", "PERMIT", "HULLNUM", "SPPLNDLB", "SPPLIVLB", "SPPVALUE", "DERSOURCE", "LINK","DOE")))
 
 
 # CAMS CFDETS AA
@@ -101,7 +103,7 @@ CAMS_DETS_AA<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
 
 
 CAMS_DETS_AA<-CAMS_DETS_AA %>%
-  relocate(any_of(c("CAMSID","YEAR", "MONTH", "DAY", "DEALNUM", "STATE_DNUM", "CF_LICENSE", "PERMIT", "HULLNUM", "SPPLNDLB", "SPPLIVLB", "SPPVALUE", "DERSOURCE", "LINK", "STATUS")))
+  relocate(any_of(c("CAMSID","YEAR", "MONTH", "DAY", "DEALNUM", "STATE_DNUM", "CF_LICENSE", "PERMIT", "HULLNUM", "SPPLNDLB", "SPPLIVLB", "SPPVALUE", "DERSOURCE", "LINK", "DOE", "STATUS")))
 
 dbDisconnect(star_dbi_ROracle)
 
@@ -128,9 +130,9 @@ The same is true for the next group of rows (row 6 compared to rows 7:10).
 ```{r CFDERS_ALL_YEARS, results=TRUE, eval=TRUE}
 DERS_AY<-DERS_ALL_YEARS %>%
   head(10) %>%
-  select(any_of(c("YEAR", "MONTH", "DAY", "DEALNUM", "STATE_DNUM", "CF_LICENSE", "PERMIT", "HULLNUM", "SPPLNDLB", "SPPLIVLB", "SPPVALUE", "DERSOURCE", "LINK")))
+  select(any_of(c("YEAR", "MONTH", "DAY", "DEALNUM", "STATE_DNUM", "CF_LICENSE", "PERMIT", "HULLNUM", "SPPLNDLB", "SPPLIVLB", "SPPVALUE", "DERSOURCE", "LINK", "DOE")))
 
-kbl(DERS_AY, digits=0,booktabs=T, align=c("l",rep('r',times=12)), caption =  "Select data from CFDERS_ALL_YEARS") %>%
+kbl(DERS_AY, digits=0,booktabs=T, align=c("l",rep('r',times=13)), caption =  "Select data from CFDERS_ALL_YEARS") %>%
     kable_styling(full_width = T,latex_options = "hold_position") %>% 
       row_spec(0,bold=FALSE) 
 
@@ -146,13 +148,13 @@ test<-DERS_ALL_YEARS %>%
 
 ```
 
-The same problem occurs in the CFDERS_ALL_YEARS version of the table. CF_License and hullnum match,spplndlb and spplivlb sum up, and the date differs by 1 day.  The DERSOURCE is WHSE. 
+The same problem occurs in the CFDERS_ALL_YEARS version of the table. CF_License and hullnum match,spplndlb and spplivlb sum up, and the date differs by 1 day.  The DERSOURCE is WHSE and the entry date of the aggregate observation is in 2023.
 
 
 ```{r DERS2021, results=TRUE, eval=TRUE}
 DER<-DERS2021 %>%
   head(10) %>%
-  select(any_of(c("YEAR", "MONTH", "DAY", "DEALNUM", "STATE_DNUM", "CF_LICENSE", "PERMIT", "HULLNUM", "SPPLNDLB", "SPPLIVLB", "SPPVALUE", "DERSOURCE", "LINK")))
+  select(any_of(c("YEAR", "MONTH", "DAY", "DEALNUM", "STATE_DNUM", "CF_LICENSE", "PERMIT", "HULLNUM", "SPPLNDLB", "SPPLIVLB", "SPPVALUE", "DERSOURCE", "LINK", "DOE")))
 
 
 kbl(DER, digits=0,booktabs=T, align=c("l",rep('r',times=12)), caption =  "Select data from CFDBS.CFDERS2021") %>%
@@ -160,10 +162,7 @@ kbl(DER, digits=0,booktabs=T, align=c("l",rep('r',times=12)), caption =  "Select
       row_spec(0,bold=FALSE) 
 
 ```
-Regular CFDERS is different.  Missing things are aggregated into day=0
-
-
-
+Regular CFDERS is different.  I'm pretty sure missing things are aggregated into day=0, but I'm not 100% sure.  The aggregate entry comes in 2022.
 
 ```{r CAMS_DETS2021, results=TRUE, eval=TRUE}
 CAM_DETSAA<-CAMS_DETS_AA %>%
@@ -178,6 +177,8 @@ kbl(CAM_DETSAA, digits=0,booktabs=T, align=c("l",rep('r',times=12)), caption =  
 
 ```
 Since I can't filter using cf_license, this show some extra rows that are not necessarily a concern.
+
+I only set out to investigate the story with some of the Unclassified Market category, so I don't know how whether this is a single vessel-dealer or a more systematic problem. 
 
 
 # R Session Information
