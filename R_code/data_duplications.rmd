@@ -39,9 +39,9 @@ options(tinytex.verbose = TRUE)
 
 # Overview
 
-I think there may be some "duplicated" records in CFDBS tables.  These look like they are entered late
+I think there may be some "duplicated" records in CFDBS tables.  These look like they are entered late.
 
-
+I only set out to investigate the story with some of the Unclassified Market category, so I don't know how whether this is a single vessel-dealer-state or a more systematic problem.
 
 # Dependencies
 
@@ -178,7 +178,6 @@ kbl(CAM_DETSAA, digits=0,booktabs=T, align=c("l",rep('r',times=12)), caption =  
 ```
 Since I can't filter using cf_license, this show some extra rows that are not necessarily a concern.
 
-I only set out to investigate the story with some of the Unclassified Market category, so I don't know how whether this is a single vessel-dealer or a more systematic problem. 
 
 
 # R Session Information
