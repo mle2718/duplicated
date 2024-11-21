@@ -1,0 +1,665 @@
+---
+title: "duplicate data?"
+author: "Min-Yang Lee"
+date: "11/21/2024"
+output:
+  html_document: default
+  pdf_document: default
+urlcolor: blue
+---
+# Project setup
+here(), load libraries, and set a data vintage.  
+
+
+```{r setup, echo=FALSE, results=FALSE, results='hide'}
+# Set Path
+here::i_am("R_code/data_mismatchDE2.rmd")
+library("here")
+library("ROracle")
+library("tidyverse")
+library("lubridate")
+library("readr")
+library("kableExtra")
+library("data.table")
+
+#Data vintage
+vintage_string<-Sys.Date()
+vintage_string<-gsub("-","_",vintage_string)
+
+#############################################################################
+#knitr options
+
+knitr::opts_chunk$set(echo=FALSE, warning = FALSE, error = FALSE, message = FALSE, comment = FALSE, cache = FALSE, progress = TRUE, verbose = FALSE, 
+											dpi = 600)
+options(tinytex.verbose = TRUE)
+# options(knitr.table.format = "latex")
+
+
+# Set up paths.
+my_images<-here("images")
+
+descriptive_images<-here("images","descriptive")
+exploratory_images<-here("images","exploratory")
+
+```
+
+# Overview
+
+There is strong evidence of "duplicated" records in CFDBS tables coming from Delaware.
+
+# Dependencies
+
+This code depends on:
+
+1.  The ability to connect to NEFSC oracle databases (CAMS, NEFSC_GARFO, CFDERS).
+
+
+# Data Overview
+
+Data Comes from CAMS_LAND, NEFSC_GARFO.CFDERS_ALL_YEARS,  nefsc_garfo.trip_reports_catch, and nefsc_garfo.trip_reports_images
+
+This figure shows that the amount of landings in CAMS_LAND without a VTR match (this is all entries with ``STATUS<>MATCH``) has risen precipitously for the state of Delaware starting  in 2021 or 2022. The VTR hails follow the same general pattern as the CAMS matches, with the exception of 2020 and 2021. The wedge between VTR hail weights and CAMS match in 2022 and 2023 looks pretty normal. 
+
+```{r CAMS_match_de, fig.show = "hold", out.width = "75%", fig.cap="CAMS Landings with Matched VTR, CAMS Landings without Matched VTR, and VTR hail weights",  fig.align = "center", echo=FALSE}
+knitr::include_graphics(file.path(descriptive_images,c("cams_veslog_hails_DE.png")))
+```
+
+\clearpage
+
+
+# March of 2021
+
+This trip from March 2021 reported landing in Ocean City Harbor, MD and selling to 2 dealers.  I believe there is a partial duplicate in CFDERS_ALL_YEARS that eventually shows up in CAMS.  The landing associated with Dealer 4845 ends up duplicated as a "DE_SUPER" record.
+
+1.  Extract data from TRIP_REPORTS_CATCH, TRIP_REPORTS_IMAGES for this trip. 
+2.  Extract data from CFDERS_ALL_YEARS for both this trip and any other trips in Delaware in the same month. 
+3.  Extract data from CAMS_LANDS for both this trip and any other trips in Delaware in the same month. 
+
+
+```{r data_query_March2021, echo=TRUE,eval=TRUE}
+star_dbi_ROracle <- DBI::dbConnect(dbDriver("Oracle"),id, password=novapw, dbname=nefscusers.connect.string)
+
+
+# VTR
+CURRENT.QUERY <- "select * from nefsc_garfo.trip_reports_catch 
+  where imgid in (select distinct imgid from nefsc_garfo.trip_reports_images 
+    where serial_num='3304342103120901') and
+    species_id='BSB'"
+vtr_trip1<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect() 
+
+CURRENT.QUERY <-"select * from nefsc_garfo.cfders_all_years 
+  where nespp3=335 
+  and ((state=08 and year=2021 and month=3) or VTRSERNO='33043421031209')"
+DERS_PROBLEMS<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect()
+
+
+CURRENT.QUERY <-"select * from cams_land 
+  where itis_tsn=167687 
+  and ((state='DE' and year=2021 and month=3) or docid='33043421031209')"
+CAMS_INHERITS<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect()
+
+
+#just a list of columns I will want to show
+vtr_cols<-c( "IMGID","SERIAL_NUM","SPECIES_ID", "KEPT", "DEALER_NUM","DATE_SOLD", "PORT_LANDED", "STATE_LANDED")
+DERS_COLS<-c( "YEAR","MONTH", "DAY", "PORT", "STATE", "DEALNUM","DEALER_NAME", "SPPLNDLB", "PERMIT", "DOE", "ENTRY_DATE")
+CAMS_COLS<-c( "STATUS","YEAR","MONTH", "DLR_DATE", "PORT", "STATE", "DLRID","DEALER_NAME", "LNDLB", "PERMIT","HULLID", "DATE_RUN")
+
+
+
+```
+## VTR 
+The VTR shows that vessel operator reported selling BSB to 2 dealers.
+```{r VTR, echo=TRUE, results=TRUE, eval=TRUE}
+
+VTR_TABLE<-vtr_trip1 %>%
+   select(any_of(vtr_cols))%>%
+  arrange(DEALER_NUM)
+
+kbl(VTR_TABLE, digits=0,booktabs=T, align=c("l",rep('r',times=length(vtr_cols)-1)), caption =  "VTR Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+
+## DERS ALL YEARS
+
+A monthly totals show three "dealers" in DE: two match the vtr record while the third shows an NA dealnum. The landed pounds for the NA dealnum exactly matches the 4845 Dealnum.
+
+```{r DERS_YEARS_SUMMARY, echo=TRUE, results=TRUE, eval=TRUE}
+
+DERS_SUMMARY<-DERS_PROBLEMS %>%
+  group_by(DEALNUM) %>%
+  dplyr::summarise(SPPLNDLB=sum(SPPLNDLB))%>%
+  arrange(DEALNUM)
+
+kbl(DERS_SUMMARY, digits=0,booktabs=T, align=c("l","r"), caption =  "DERS_SUMMARY") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+A closer look at the Raw data. The DOE for the ``DE SUPER`` entry is quite different 
+```{r DERS_YEARS_RAW, echo=TRUE, results=TRUE, eval=TRUE}
+
+DERS_RAW<-DERS_PROBLEMS %>%
+   select(any_of(DERS_COLS))
+
+
+kbl(DERS_RAW, digits=0,booktabs=T, align=c("l",rep('r',times=length(DERS_COLS)-1)), caption =  "DERS Raw Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+
+
+
+
+## CAMS Inherits this problem
+
+
+
+
+```{r CAMS_SUMMARY, results=TRUE, eval=TRUE}
+
+CAMS_SUMMARY<-CAMS_INHERITS %>%
+  group_by(DLRID) %>%
+  dplyr::summarise(LNDLB=sum(LNDLB))%>%
+  arrange(DLRID)
+
+kbl(CAMS_SUMMARY, digits=0,booktabs=T, align=c("l","r"), caption =  "DERS_SUMMARY") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+
+```{r CAMS_YEARS_RAW, results=TRUE, eval=TRUE}
+
+CAMS_RAW<-CAMS_INHERITS %>%
+   select(any_of(CAMS_COLS))
+
+
+kbl(CAMS_RAW, digits=0,booktabs=T, align=c("l",rep('r',times=length(DERS_COLS)-1)), caption =  "DERS Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+*Speculation*: Someone in Delaware saw that the VTR reported a total of 44,518 lbs, but only saw 41,018 in their system and added the 3,500 to balance.  
+
+
+
+# February of 2021
+
+This trip is very similar, although there are three dealers this time.  The landings associated with Dealer 4845 end up duplicated as a "DE_SUPER" record.
+
+```{r data_query_Feb2021, echo=TRUE,eval=TRUE}
+
+# VTR
+CURRENT.QUERY <- "select * from nefsc_garfo.trip_reports_catch
+  where imgid in (
+    select distinct imgid from nefsc_garfo.trip_reports_images 
+      where substr(serial_num,1,14) in ('33043421020315'))
+  and species_id='BSB'
+  order by date_sold, dealer_num"
+
+vtr_trip2<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect() 
+
+
+
+# Ders_all_years
+CURRENT.QUERY <- "select * from nefsc_garfo.cfders_all_years
+  where year=2021
+  and nespp3=335
+  and ((state='08' and month=2) or VTRSERNO='33043421020315') "
+
+DERS_PROBLEMS2<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect()
+
+
+
+CURRENT.QUERY <-"select * from cams_land
+  where itis_tsn=167687 
+  and ((state='DE' and year=2021 and month=2) or docid='33043421020315')"
+CAMS_INHERITS2<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect()
+
+
+
+
+```
+## VTR 
+
+```{r VTR2, results=TRUE, eval=TRUE}
+
+
+VTR_TABLE<-vtr_trip2 %>%
+   select(any_of(vtr_cols))%>%
+  arrange(DEALER_NUM)
+
+kbl(VTR_TABLE, digits=0,booktabs=T, align=c("l",rep('r',times=length(vtr_cols)-1)), caption =  "VTR Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+
+## DERS ALL YEARS
+
+All the quantities match up *except* there is an extra record  for DEALNUM=NA.  The DOE is exactly the same as previous. 
+
+```{r DERS_YEARS_SUMMARY2, results=TRUE, eval=TRUE}
+
+DERS_SUMMARY<-DERS_PROBLEMS2 %>%
+  group_by(DEALNUM) %>%
+  dplyr::summarise(SPPLNDLB=sum(SPPLNDLB))%>%
+  arrange(DEALNUM)
+
+kbl(DERS_SUMMARY, digits=0,booktabs=T, align=c("l","r"), caption =  "DERS_SUMMARY") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+
+```{r DERS_YEARS_RAW2, results=TRUE, eval=TRUE}
+
+DERS_RAW<-DERS_PROBLEMS2 %>%
+   select(any_of(DERS_COLS))%>%
+    arrange(DEALNUM, DAY)
+
+
+kbl(DERS_RAW, digits=0,booktabs=T, align=c("l",rep('r',times=length(DERS_COLS)-1)), caption =  "DERS Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+
+
+
+
+## CAMS Inherits this problem
+
+
+
+
+```{r CAMS_SUMMARY2, results=TRUE, eval=TRUE}
+
+CAMS_SUMMARY<-CAMS_INHERITS2 %>%
+  group_by(DLRID) %>%
+  dplyr::summarise(LNDLB=sum(LNDLB))
+
+kbl(CAMS_SUMMARY, digits=0,booktabs=T, align=c("l","r"), caption =  "DERS_SUMMARY") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+
+```{r CAMS_YEARS_RAW2, results=TRUE, eval=TRUE}
+
+CAMS_RAW<-CAMS_INHERITS2 %>%
+   select(any_of(CAMS_COLS))%>%
+  arrange(DLRID, DLR_DATE)
+
+
+kbl(CAMS_RAW, digits=0,booktabs=T, align=c("l",rep('r',times=length(DERS_COLS)-1)), caption =  "DERS Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+
+I checked these two months because the quantity landed was a small, round number, and there were few trips. I believe it is symptomatic not exhaustive, but it is very difficult to figure this out in months when landings are higher.
+
+
+For both of these entries, it is possible that these Delaware aggregate records are true records and not duplicates.
+As additional evidence against this, I note that:
+
+  * Delaware requires a landing permit 
+  * Firms with a pot permit must have a Federal BSB permit (and therefore would be subject to vtr requirements). 
+  * Firms with a hook and line permit do not need to have a federal BSB permit
+  * There is no provision for incidental or bycatch for vessels without a landing permit. 
+
+These landings *could* be coming from Hook and line vessels without any federal and be sold to a state dealer without a federal dealer permit. It seems rather unlikely that this would happen and match an entry exactly in our dealer data. 
+
+# Home consumption
+
+
+There are also some entries that suggest that the "home consumption" is being added back into dealer data in Delaware. If this is happening, we need to be very careful about using the CAMS "VTR_NOT_SOLD."
+
+
+## March 2023
+
+Extract the VTR landings for 3304342303241101. Extract CAMS records for the same month. 
+```{r data_query_March2023, echo=TRUE,eval=TRUE}
+
+# VTR
+CURRENT.QUERY <- "select * from nefsc_garfo.trip_reports_catch 
+  where imgid in 
+    (select distinct imgid from nefsc_garfo.trip_reports_images where serial_num='3304342303241101')
+  and species_id='BSB'"
+
+vtr_trip3<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect() 
+
+CURRENT.QUERY <-"select * from cams_land
+  where year=2023
+  and month=3 
+  and state='DE'
+  and itis_tsn=167687
+  order by dlrid"
+CAMS_INHERITS3<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect()
+
+CURRENT.QUERY <-"select * from nefsc_garfo.cfders_all_years
+  where year=2023
+  and month=3
+  and state='08'
+  and nespp3=335
+  order by dealnum"
+DERS3<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect()
+
+
+
+
+```
+
+There are 200 lbs of Home consumption in this VTR.
+
+```{r VTR3, results=TRUE, eval=TRUE}
+
+
+VTR_TABLE<-vtr_trip3 %>%
+   select(any_of(vtr_cols))%>%
+  arrange(DEALER_NUM)
+
+kbl(VTR_TABLE, digits=0,booktabs=T, align=c("l",rep('r',times=length(vtr_cols)-1)), caption =  "VTR Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+CAMS pulls in the BHC entry from VTR. Note the PZERO entry immediately below
+
+
+```{r CAMS_YEARS_RAW3, results=TRUE, eval=TRUE}
+
+CAMS_RAW<-CAMS_INHERITS3 %>%
+   select(any_of(c("BHC",CAMS_COLS)))
+
+
+kbl(CAMS_RAW, digits=0,booktabs=T, align=c("l",rep('r',times=length(DERS_COLS)-1)), caption =  "CAMS Raw Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+The DOE here is from September 11, 2024.
+
+```{r DERS_YEARS_RAW3, results=TRUE, eval=TRUE}
+
+DERS_RAW<-DERS3 %>%
+   select(any_of(DERS_COLS))%>%
+    arrange(DEALNUM, DAY)
+
+
+kbl(DERS_RAW, digits=0,booktabs=T, align=c("l",rep('r',times=length(DERS_COLS)-1)), caption =  "DERS Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+
+## January 2021
+
+
+Extract the VTR landings for 3304342101011002 Extract CAMS records for the same month. 
+
+```{r data_query_Jan2021, echo=TRUE,eval=TRUE}
+
+
+# VTR
+CURRENT.QUERY <- "select * from nefsc_garfo.trip_reports_catch
+  where imgid in (
+    select distinct imgid from nefsc_garfo.trip_reports_images where serial_num='3304342101011002')
+  and species_id='BSB'"
+
+vtr_trip4<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect() 
+
+CURRENT.QUERY <-"select * from cams_land
+  where year=2021
+  and month=1
+  and state='DE'
+  and itis_tsn=167687
+  order by camsid"
+CAMS_INHERITS4<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect()
+
+
+CURRENT.QUERY <-"select * from nefsc_garfo.cfders_all_years
+  where year=2021
+  and month=1
+  and state='08'
+  and nespp3=335
+  order by dealnum"
+DERS4<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect()
+
+```
+
+
+
+
+There are 75 lbs of Home consumption in the VTR
+
+```{r VTR4, results=TRUE, eval=TRUE}
+
+
+VTR_TABLE<-vtr_trip4 %>%
+   select(any_of(vtr_cols))%>%
+  arrange(DEALER_NUM)
+
+kbl(VTR_TABLE, digits=0,booktabs=T, align=c("l",rep('r',times=length(vtr_cols)-1)), caption =  "VTR Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+CAMS pulls in the BHC entry from VTR. Note the corresponding PZERO entry immediately below.
+
+
+```{r CAMS_YEARS_RAW4, results=TRUE, eval=TRUE}
+
+CAMS_RAW<-CAMS_INHERITS4 %>%
+   select(any_of(c("BHC",CAMS_COLS)))%>%
+  arrange(STATUS)
+
+
+kbl(CAMS_RAW, digits=0,booktabs=T, align=c("l",rep('r',times=length(DERS_COLS)-1)), caption =  "CAMS Raw Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+
+
+
+
+I'll just show the entry for DE Super in CFDERS.
+```{r DERS_YEARS_RAW4, results=TRUE, eval=TRUE}
+
+DERS_RAW<-DERS4 %>%
+   select(any_of(DERS_COLS))%>%
+  dplyr::filter(is.na(DEALNUM)) %>%
+  arrange(DEALNUM, DAY)
+
+
+kbl(DERS_RAW, digits=0,booktabs=T, align=c("l",rep('r',times=length(DERS_COLS)-1)), caption =  "DERS Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+
+
+
+
+# Duplicates from VTR
+
+
+Extract Delaware VTRs for BSB between November and December of 2023.
+
+Extract CAMS data for Delaware in the same time period.
+
+
+```{r data_query_NovDec2023, echo=TRUE,eval=TRUE}
+
+# VTR
+CURRENT.QUERY <- "select c.date_sold, c.port_landed, c.state_landed, c.dealer_num, c.species_id, c.kept, c.imgid, i.serial_num from nefsc_garfo.trip_reports_catch c
+  LEFT JOIN  nefsc_garfo.trip_reports_images i 
+    ON c.imgid=i.imgid 
+  where c.state_landed='DE' 
+  and c.species_id='BSB'
+  and date_sold between to_date('November 1, 2023', 'Month dd, YYYY') and to_date('December 31, 2023', 'Month dd, YYYY') 
+  order by dealer_num, serial_num , date_sold"
+
+vtr_trip6<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect() 
+
+CURRENT.QUERY <-"select * from cams_land
+  where year=2023
+  and month in (11,12)
+  and state='DE'
+  and itis_tsn=167687 order by camsid"
+CAMS_INHERITS6<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect()
+
+
+
+CURRENT.QUERY <-"select permit, day, month, dealnum, spplndlb, sppvalue, DOE  from nefsc_garfo.cfders_all_years 
+    where state='08' 
+    and nespp3=335
+    and year>=2023 
+    and month in (11,12) "
+
+DERS6<-dplyr::tbl(star_dbi_ROracle,sql(CURRENT.QUERY)) %>%
+   collect()
+
+```
+
+## December 2023
+
+There is a row in CFDBS with DEALNUM=0 that exactly matches the VTR landings for permit 149622. This propagates directly into CAMS. 
+
+Here is the raw CAMS landings.
+
+
+```{r CAMS_RAW_not_sold12, results=TRUE, eval=TRUE}
+
+
+CAMS_RAW<-CAMS_INHERITS6 %>%
+  dplyr::filter(MONTH==12)%>%
+   select(any_of(CAMS_COLS))%>%
+  arrange(DLRID, DLR_DATE)
+
+
+kbl(CAMS_RAW, digits=0,booktabs=T, align=c("l",rep('r',times=length(DERS_COLS)-1)), caption =  "CAMS Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+
+
+```
+And aggregated by Status. The suspicious thing here is that the PZERO landings are very close to the MATCH landings
+
+```{r CAMS_summary_not_sold12, results=TRUE, eval=TRUE}
+
+
+CAMS_TABLE<-CAMS_INHERITS6 %>%
+  dplyr::filter(MONTH==12)%>%
+  group_by(STATUS) %>%
+   dplyr::summarise(LNDLB=sum(LNDLB))
+
+
+kbl(CAMS_TABLE, digits=0,booktabs=T, align=c("l","r"), caption =  "CAMS totals Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+```
+
+And here is the raw CFDERS, the DOE here is September 11, 2024
+
+
+```{r DERS_raw_not_sold, results=TRUE, eval=TRUE}
+DERS_RAW<-DERS6 %>%
+  dplyr::filter(MONTH==12)%>%
+   select(any_of(DERS_COLS))%>%
+  arrange(DEALNUM, DAY)
+
+
+kbl(DERS_RAW, digits=0,booktabs=T, align=c("l",rep('r',times=length(DERS_COLS)-1)), caption =  "CFDERS Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+
+
+```
+
+
+
+
+
+```{r DERS_summary_not_sold12, results=TRUE, eval=TRUE}
+DERS_TABLE<-DERS6 %>%
+    dplyr::filter(MONTH==12)%>%
+  group_by(PERMIT, DEALNUM) %>%
+   dplyr::summarise(SPPLNDLB=sum(SPPLNDLB))
+
+
+kbl(DERS_TABLE, digits=0,booktabs=T, align=c("l","r","r"), caption =  "DERS Summary totals Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+
+```
+
+Note that the VTR hail landings for 149622 exactly matches the landings for PERMIT=000000 in CFDERS. I have absolutely no idea why this is happening.
+
+
+```{r VTR_SUMMARY, results=TRUE, eval=TRUE}
+VTR_TABLE<-vtr_trip6 %>%
+  mutate(permit=str_sub(SERIAL_NUM,1,6)) %>%
+  mutate(MONTH=month(DATE_SOLD)) %>%
+  dplyr::filter(MONTH==12)%>%
+    group_by(permit) %>%
+  summarise(lndlb=sum(KEPT))
+
+  kbl(VTR_TABLE, digits=0,booktabs=T, align=c("l","r"), caption =  "VTR Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+
+```
+
+
+```{r VTR_Raw_notsold12, results=TRUE, eval=TRUE}
+VTR_TABLE<-vtr_trip6 %>%
+   select(any_of(vtr_cols))%>%
+  mutate(MONTH=month(DATE_SOLD)) %>%
+  dplyr::filter(MONTH==12)%>%
+  arrange(MONTH,DEALER_NUM, SERIAL_NUM , DATE_SOLD)
+
+kbl(VTR_TABLE, digits=0,booktabs=T, align=c("l",rep('r',times=length(vtr_cols)-1)), caption =  "VTR Data") %>%
+    kable_styling(full_width = T,latex_options = "hold_position") %>% 
+      row_spec(0,bold=FALSE) 
+
+```
+
+
+
+
+
+
+
+
+
+
+
+# R Session Information
+```{r session_info, include=TRUE, echo=TRUE, results=TRUE, eval=TRUE}
+sessionInfo()
+Sys.Date()
+
+```
+This may be useful for diagnosing and troubleshooting one day.
+
+
